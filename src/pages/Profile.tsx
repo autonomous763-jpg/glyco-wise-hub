@@ -9,6 +9,9 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
+import { authService } from "@/services/auth";
+import { mealsService } from "@/services/meals";
+import { vitalsService } from "@/services/vitals";
 
 const Profile = () => {
   const [formData, setFormData] = useState({
@@ -26,32 +29,94 @@ const Profile = () => {
     heartRate: "92",
   });
   const [recentMeals, setRecentMeals] = useState<any[]>([]);
+  const [userId, setUserId] = useState<string>("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    const userData = localStorage.getItem("glycocare_user");
-    if (!userData) {
-      navigate("/login");
-      return;
-    }
-    
-    const user = JSON.parse(userData);
-    setFormData({ ...formData, ...user });
+    const loadProfile = async () => {
+      try {
+        const user = await authService.getCurrentUser();
+        if (!user) {
+          navigate("/login");
+          return;
+        }
 
-    // Load recent meals
-    const meals = JSON.parse(localStorage.getItem("glycocare_meals") || "[]");
-    setRecentMeals(meals.slice(-3).reverse());
+        setUserId(user.id);
+        setFormData({
+          name: user.name || "",
+          age: user.age?.toString() || "",
+          weight: user.weight?.toString() || "",
+          diabetes: !!user.diabetes_type,
+          bloodPressure: user.has_bp || false,
+          heart: user.has_heart_condition || false,
+          medication: false,
+          autoSync: false,
+          glucose: "145",
+          systolic: "138",
+          diastolic: "88",
+          heartRate: "92",
+        });
+
+        const latestVitals = await vitalsService.getLatestVitals(user.id);
+        if (latestVitals) {
+          setFormData(prev => ({
+            ...prev,
+            glucose: latestVitals.glucose_level?.toString() || "145",
+            systolic: latestVitals.bp_systolic?.toString() || "138",
+            diastolic: latestVitals.bp_diastolic?.toString() || "88",
+            heartRate: latestVitals.heart_rate?.toString() || "92",
+          }));
+        }
+
+        const meals = await mealsService.getMealHistory(user.id, 3);
+        setRecentMeals(meals);
+      } catch (error) {
+        console.error("Failed to load profile:", error);
+        navigate("/login");
+      }
+    };
+
+    loadProfile();
   }, [navigate]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("glycocare_user", JSON.stringify(formData));
-    
-    toast({
-      title: "Profile updated",
-      description: "Your health profile has been saved successfully",
-    });
+    setLoading(true);
+
+    try {
+      await authService.updateProfile(userId, {
+        name: formData.name,
+        age: parseInt(formData.age) || undefined,
+        weight: parseFloat(formData.weight) || undefined,
+        diabetes_type: formData.diabetes ? 'type2' : null,
+        has_bp: formData.bloodPressure,
+        has_heart_condition: formData.heart,
+      });
+
+      await vitalsService.saveVitals({
+        user_id: userId,
+        glucose_level: parseFloat(formData.glucose),
+        bp_systolic: parseInt(formData.systolic),
+        bp_diastolic: parseInt(formData.diastolic),
+        heart_rate: parseInt(formData.heartRate),
+      });
+
+
+      toast({
+        title: "Profile updated",
+        description: "Your health profile has been saved successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Update failed",
+        description: error.message || "Could not update profile",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -205,8 +270,8 @@ const Profile = () => {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full">
-                Save Profile
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Saving..." : "Save Profile"}
               </Button>
             </form>
           </CardContent>

@@ -1,5 +1,8 @@
-// Mock API functions for GlycoCare+
-// TODO: Replace with real backend endpoints
+import { authService } from '@/services/auth';
+import { vitalsService } from '@/services/vitals';
+import { mealsService } from '@/services/meals';
+import { chatService } from '@/services/chat';
+import { huggingFaceService } from '@/services/huggingface';
 
 export interface DashboardData {
   glucose: number;
@@ -38,100 +41,250 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-// Mock Dashboard API
 export const fetchDashboard = async (userId: string): Promise<DashboardData> => {
-  // TODO: Replace with actual API call
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  
-  return {
-    glucose: 145,
-    systolic: 138,
-    diastolic: 88,
-    heartRate: 92,
-    latestMeal: {
-      dish: "Chicken Biryani",
-      portion: 250,
-      glucoseDelta: 14.6,
-      timestamp: new Date().toISOString(),
-    },
-  };
+  try {
+    const latestVitals = await vitalsService.getLatestVitals(userId);
+    const latestMeal = await mealsService.getLatestMeal(userId);
+
+    return {
+      glucose: latestVitals?.glucose_level || 120,
+      systolic: latestVitals?.bp_systolic || 120,
+      diastolic: latestVitals?.bp_diastolic || 80,
+      heartRate: latestVitals?.heart_rate || 75,
+      latestMeal: latestMeal ? {
+        dish: latestMeal.dish_name,
+        portion: latestMeal.portion_g || 0,
+        glucoseDelta: latestMeal.glucose_delta || 0,
+        timestamp: latestMeal.timestamp || new Date().toISOString(),
+      } : undefined,
+    };
+  } catch (error) {
+    console.error('Error fetching dashboard:', error);
+    return {
+      glucose: 120,
+      systolic: 120,
+      diastolic: 80,
+      heartRate: 75,
+    };
+  }
 };
 
-// Mock Analyze API
 export const analyzeMeal = async (image: File, vitals: any): Promise<AnalyzeResult> => {
-  // TODO: Replace with actual API call to /api/analyze
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  
-  return {
-    dish: "Chicken Biryani",
-    portion: 250,
-    predictedDelta: 14.6,
-    confidence: 89,
-    advice: "Your glucose is moderately elevated and BP slightly high. This meal is high in carbs and sodium. Consider brown rice next time and reduce salt. Take a 10-minute walk after eating to help regulate glucose.",
-    status: "borderline",
-    tips: [
-      "Take a 10-minute walk after eating",
-      "Drink plenty of water",
-      "Monitor glucose after 2 hours",
-    ],
-    foodSwaps: [
-      "Replace white rice with brown rice",
-      "Use less oil and salt",
-      "Add more vegetables",
-    ],
-  };
+  try {
+    const reader = new FileReader();
+    const imageBase64 = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(image);
+    });
+
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('User not authenticated');
+
+    const classification = await huggingFaceService.classifyFood(imageBase64);
+    const portionG = await huggingFaceService.estimatePortion(imageBase64, classification.dish);
+    const glucoseDelta = await huggingFaceService.predictGlucoseDelta(
+      classification.dish,
+      portionG,
+      parseFloat(vitals.glucose),
+      user
+    );
+
+    const status = huggingFaceService.determineStatus(glucoseDelta, parseFloat(vitals.glucose));
+    const advice = huggingFaceService.generateAdvice(classification.dish, glucoseDelta, status, user);
+
+    const tips = generateTips(status, glucoseDelta);
+    const foodSwaps = generateFoodSwaps(classification.dish);
+
+    return {
+      dish: classification.dish,
+      portion: portionG,
+      predictedDelta: glucoseDelta,
+      confidence: Math.round(classification.confidence * 100),
+      advice,
+      status,
+      tips,
+      foodSwaps,
+    };
+  } catch (error) {
+    console.error('Error analyzing meal:', error);
+    throw error;
+  }
 };
 
-// Mock Save Meal API
 export const saveMeal = async (mealData: any): Promise<boolean> => {
-  // TODO: Replace with actual API call
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  
-  // Store in localStorage for now
-  const meals = JSON.parse(localStorage.getItem("glycocare_meals") || "[]");
-  meals.push({ ...mealData, timestamp: new Date().toISOString() });
-  localStorage.setItem("glycocare_meals", JSON.stringify(meals));
-  
-  return true;
+  try {
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('User not authenticated');
+
+    await mealsService.saveMeal({
+      user_id: user.id,
+      dish_name: mealData.dish,
+      portion_g: mealData.portion,
+      glucose_delta: mealData.predictedDelta,
+      confidence: mealData.confidence / 100,
+      advice: mealData.advice,
+      status: mealData.status,
+    });
+
+    if (mealData.vitals) {
+      await vitalsService.saveVitals({
+        user_id: user.id,
+        glucose_level: parseFloat(mealData.vitals.glucose),
+        bp_systolic: parseInt(mealData.vitals.systolic),
+        bp_diastolic: parseInt(mealData.vitals.diastolic),
+        heart_rate: parseInt(mealData.vitals.heartRate),
+      });
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error saving meal:', error);
+    return false;
+  }
 };
 
-// Mock Meal Planner API
 export const fetchMealPlan = async (): Promise<MealPlan[]> => {
-  // TODO: Replace with actual API call to /api/plan
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  return days.map((day) => ({
-    day,
-    breakfast: "Oatmeal with berries and nuts",
-    lunch: "Grilled chicken salad with olive oil",
-    dinner: "Baked salmon with steamed vegetables",
-  }));
+  try {
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('User not authenticated');
+
+    const mealStats = await mealsService.getMealStats(user.id, 7);
+    const vitalsSum = await vitalsService.getVitalsSummary(user.id, 7);
+
+    return generateMealPlan(user, vitalsSum, mealStats);
+  } catch (error) {
+    console.error('Error fetching meal plan:', error);
+    return generateDefaultMealPlan();
+  }
 };
 
-// Mock Regenerate Plan API
 export const regenerateMealPlan = async (): Promise<MealPlan[]> => {
-  // TODO: Replace with actual API call
   return fetchMealPlan();
 };
 
-// Mock Chat API
 export const sendChatMessage = async (message: string, history: ChatMessage[]): Promise<string> => {
-  // TODO: Replace with actual API call to /api/chat
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  
-  const responses = {
-    "low-gi": "Try grilled fish with brown rice and steamed vegetables. Add a side of lentils for extra fiber.",
-    "reduce bp": "Take a 10-minute walk, drink water, and avoid salty foods for the next few hours.",
-    default: "I'm here to help with your nutrition and health questions. Try asking about meal suggestions or health tips!",
-  };
-  
-  const lowerMsg = message.toLowerCase();
-  if (lowerMsg.includes("low-gi") || lowerMsg.includes("dinner")) {
-    return responses["low-gi"];
-  } else if (lowerMsg.includes("bp") || lowerMsg.includes("blood pressure")) {
-    return responses["reduce bp"];
+  try {
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('User not authenticated');
+
+    await chatService.saveChatMessage({
+      user_id: user.id,
+      role: 'user',
+      message,
+    });
+
+    const chatHistory = await chatService.getChatHistory(user.id, 20);
+    const latestVitals = await vitalsService.getLatestVitals(user.id);
+    const mealStats = await mealsService.getMealStats(user.id, 7);
+
+    const userContext = {
+      ...user,
+      latestVitals,
+      mealStats,
+    };
+
+    const response = await chatService.sendMessageToGroq(message, chatHistory, userContext);
+
+    await chatService.saveChatMessage({
+      user_id: user.id,
+      role: 'assistant',
+      message: response,
+    });
+
+    return response;
+  } catch (error) {
+    console.error('Error sending chat message:', error);
+    return "I'm having trouble connecting right now. Please try again in a moment.";
   }
-  
-  return responses.default;
 };
+
+function generateTips(status: string, glucoseDelta: number): string[] {
+  const tips = [];
+
+  if (status === 'high') {
+    tips.push('Take a 15-minute walk after eating');
+    tips.push('Drink plenty of water');
+    tips.push('Monitor glucose every 2 hours');
+  } else if (status === 'borderline') {
+    tips.push('Take a 10-minute walk after eating');
+    tips.push('Drink water with your meal');
+    tips.push('Monitor glucose after 2 hours');
+  } else {
+    tips.push('Maintain this portion size');
+    tips.push('Stay hydrated throughout the day');
+    tips.push('Continue making healthy choices');
+  }
+
+  return tips;
+}
+
+function generateFoodSwaps(dish: string): string[] {
+  const swaps = [];
+  const dishLower = dish.toLowerCase();
+
+  if (dishLower.includes('rice') || dishLower.includes('biryani')) {
+    swaps.push('Replace white rice with brown rice or quinoa');
+    swaps.push('Add more vegetables to reduce rice portion');
+  }
+
+  if (dishLower.includes('bread') || dishLower.includes('roti')) {
+    swaps.push('Choose whole grain bread instead');
+    swaps.push('Reduce portion size by half');
+  }
+
+  if (dishLower.includes('fried')) {
+    swaps.push('Try grilled or baked version');
+    swaps.push('Use air fryer instead of deep frying');
+  }
+
+  if (swaps.length === 0) {
+    swaps.push('Add more leafy greens');
+    swaps.push('Use healthier cooking oils');
+    swaps.push('Reduce salt and sugar content');
+  }
+
+  return swaps;
+}
+
+function generateMealPlan(user: any, vitalsSum: any, mealStats: any): MealPlan[] {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  const lowGIBreakfast = [
+    'Steel-cut oatmeal with berries and almonds',
+    'Greek yogurt with chia seeds and walnuts',
+    'Scrambled eggs with spinach and whole grain toast',
+    'Smoothie bowl with flaxseeds and fresh berries',
+  ];
+
+  const lowGILunch = [
+    'Grilled chicken salad with olive oil dressing',
+    'Lentil soup with mixed vegetables',
+    'Quinoa bowl with roasted vegetables and chickpeas',
+    'Grilled fish with steamed broccoli and brown rice',
+  ];
+
+  const lowGIDinner = [
+    'Baked salmon with asparagus and sweet potato',
+    'Chicken stir-fry with lots of vegetables',
+    'Vegetable curry with cauliflower rice',
+    'Turkey meatballs with zucchini noodles',
+  ];
+
+  return days.map((day, index) => ({
+    day,
+    breakfast: lowGIBreakfast[index % lowGIBreakfast.length],
+    lunch: lowGILunch[index % lowGILunch.length],
+    dinner: lowGIDinner[index % lowGIDinner.length],
+  }));
+}
+
+function generateDefaultMealPlan(): MealPlan[] {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  return days.map((day) => ({
+    day,
+    breakfast: 'Oatmeal with berries and nuts',
+    lunch: 'Grilled chicken salad with olive oil',
+    dinner: 'Baked salmon with steamed vegetables',
+  }));
+}

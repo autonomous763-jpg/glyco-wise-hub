@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Activity } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { authService } from "@/services/auth";
 
 const Signup = () => {
   const [formData, setFormData] = useState({
@@ -21,19 +22,37 @@ const Signup = () => {
   });
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Mock signup - store user data
-    localStorage.setItem("glycocare_user", JSON.stringify(formData));
-    
-    toast({
-      title: "Account created!",
-      description: "Welcome to GlycoCare+. Let's start your health journey.",
-    });
-    
-    navigate("/dashboard");
+    setLoading(true);
+
+    try {
+      await authService.signUp(formData.email, formData.password, {
+        name: formData.name,
+        age: parseInt(formData.age) || undefined,
+        weight: parseFloat(formData.weight) || undefined,
+        diabetes_type: formData.diabetes ? 'type2' : null,
+        has_bp: formData.bloodPressure,
+        has_heart_condition: formData.heart,
+      });
+
+      toast({
+        title: "Account created!",
+        description: "Welcome to GlycoCare+. Let's start your health journey.",
+      });
+
+      navigate("/dashboard");
+    } catch (error: any) {
+      toast({
+        title: "Signup failed",
+        description: error.message || "Could not create account",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -153,8 +172,8 @@ const Signup = () => {
               </div>
             </div>
             
-            <Button type="submit" className="w-full">
-              Create Account
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? "Creating account..." : "Create Account"}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">

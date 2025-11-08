@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Activity } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { authService } from "@/services/auth";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -13,18 +14,30 @@ const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Mock login - store user data
-    localStorage.setItem("glycocare_user", JSON.stringify({ email }));
-    
-    toast({
-      title: "Welcome back!",
-      description: "Successfully logged in to GlycoCare+",
-    });
-    
-    navigate("/dashboard");
+    setLoading(true);
+
+    try {
+      await authService.signIn(email, password);
+
+      toast({
+        title: "Welcome back!",
+        description: "Successfully logged in to GlycoCare+",
+      });
+
+      navigate("/dashboard");
+    } catch (error: any) {
+      toast({
+        title: "Login failed",
+        description: error.message || "Invalid email or password",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -64,8 +77,8 @@ const Login = () => {
                 required
               />
             </div>
-            <Button type="submit" className="w-full">
-              Sign In
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">

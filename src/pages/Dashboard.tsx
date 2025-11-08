@@ -8,6 +8,7 @@ import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { fetchDashboard, DashboardData } from "@/lib/api";
+import { authService } from "@/services/auth";
 
 const Dashboard = () => {
   const [userName, setUserName] = useState("User");
@@ -16,23 +17,28 @@ const Dashboard = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const userData = localStorage.getItem("glycocare_user");
-    if (!userData) {
-      navigate("/login");
-      return;
-    }
-    
-    const user = JSON.parse(userData);
-    setUserName(user.name || user.email.split("@")[0]);
+    const checkAuth = async () => {
+      try {
+        const user = await authService.getCurrentUser();
+        if (!user) {
+          navigate("/login");
+          return;
+        }
+        setUserName(user.name || user.email?.split("@")[0] || "User");
+        loadDashboard(user.id);
+      } catch (error) {
+        console.error("Auth check failed:", error);
+        navigate("/login");
+      }
+    };
 
-    // Fetch dashboard data
-    loadDashboard();
+    checkAuth();
   }, [navigate]);
 
-  const loadDashboard = async () => {
+  const loadDashboard = async (userId: string) => {
     setLoading(true);
     try {
-      const data = await fetchDashboard("mock123");
+      const data = await fetchDashboard(userId);
       setDashboardData(data);
     } catch (error) {
       console.error("Failed to load dashboard:", error);
