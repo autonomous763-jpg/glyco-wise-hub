@@ -4,9 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Activity } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Switch } from "@/components/ui/switch";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import Header from "@/components/Header";
+import BottomNav from "@/components/BottomNav";
 
 const Profile = () => {
   const [formData, setFormData] = useState({
@@ -16,11 +18,14 @@ const Profile = () => {
     diabetes: false,
     bloodPressure: false,
     heart: false,
+    medication: false,
+    autoSync: false,
     glucose: "145",
     systolic: "138",
     diastolic: "88",
     heartRate: "92",
   });
+  const [recentMeals, setRecentMeals] = useState<any[]>([]);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -33,6 +38,10 @@ const Profile = () => {
     
     const user = JSON.parse(userData);
     setFormData({ ...formData, ...user });
+
+    // Load recent meals
+    const meals = JSON.parse(localStorage.getItem("glycocare_meals") || "[]");
+    setRecentMeals(meals.slice(-3).reverse());
   }, [navigate]);
 
   const handleSave = (e: React.FormEvent) => {
@@ -46,29 +55,8 @@ const Profile = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="h-6 w-6 text-primary" />
-              <span className="text-xl font-bold text-primary">GlycoCare+</span>
-            </div>
-            <nav className="flex gap-4">
-              <Link to="/dashboard">
-                <Button variant="ghost">Dashboard</Button>
-              </Link>
-              <Link to="/analyze">
-                <Button variant="ghost">Analyze</Button>
-              </Link>
-              <Link to="/profile">
-                <Button variant="ghost">Profile</Button>
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
+      <Header />
 
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         <div className="mb-8">
@@ -154,6 +142,25 @@ const Profile = () => {
                 </div>
               </div>
 
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="medication">Taking Medication</Label>
+                  <Switch
+                    id="medication"
+                    checked={formData.medication}
+                    onCheckedChange={(checked) => setFormData({ ...formData, medication: checked })}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="autoSync">Auto-sync Vitals from Device</Label>
+                  <Switch
+                    id="autoSync"
+                    checked={formData.autoSync}
+                    onCheckedChange={(checked) => setFormData({ ...formData, autoSync: checked })}
+                  />
+                </div>
+              </div>
+
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold mb-4">Current Vitals</h3>
                 <div className="grid gap-4">
@@ -204,7 +211,35 @@ const Profile = () => {
             </form>
           </CardContent>
         </Card>
+
+        {/* Recent Meals */}
+        {recentMeals.length > 0 && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Recent Meals</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {recentMeals.map((meal, index) => (
+                <div key={index} className="border-b pb-4 last:border-b-0 last:pb-0">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-semibold">{meal.dish}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {meal.portion}g • +{meal.predictedDelta} mg/dL
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(meal.timestamp).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       </div>
+
+      <BottomNav />
     </div>
   );
 };

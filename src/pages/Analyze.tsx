@@ -3,13 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Activity, Upload, TrendingUp } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Upload, TrendingUp, Volume2, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import Header from "@/components/Header";
+import BottomNav from "@/components/BottomNav";
+import { analyzeMeal, saveMeal, AnalyzeResult } from "@/lib/api";
 
 const Analyze = () => {
   const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [vitals, setVitals] = useState({
     glucose: "145",
     systolic: "138",
@@ -24,48 +27,59 @@ const Analyze = () => {
 
     setAnalyzing(true);
     
-    // Mock analysis delay
-    setTimeout(() => {
-      setResult({
-        dish: "Chicken Biryani",
-        portion: 250,
-        predictedDelta: 14.6,
-        confidence: 0.89,
-        advice: "Your glucose is moderately elevated and BP slightly high. This meal is high in carbs and sodium. Consider brown rice next time and reduce salt. Take a 10-minute walk after eating to help regulate glucose.",
-        status: "borderline",
-      });
-      setAnalyzing(false);
+    try {
+      const analysisResult = await analyzeMeal(file, vitals);
+      setResult(analysisResult);
       toast({
         title: "Analysis complete",
         description: "Meal analyzed successfully",
       });
-    }, 2000);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to analyze meal",
+        variant: "destructive",
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleSaveMeal = async () => {
+    if (!result) return;
+    
+    setSaving(true);
+    try {
+      await saveMeal({
+        ...result,
+        vitals,
+      });
+      toast({
+        title: "Meal saved",
+        description: "Your meal has been saved to history",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save meal",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleVoiceAdvice = () => {
+    // TODO: Implement TTS
+    toast({
+      title: "Voice advice",
+      description: "Text-to-speech feature coming soon!",
+    });
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="h-6 w-6 text-primary" />
-              <span className="text-xl font-bold text-primary">GlycoCare+</span>
-            </div>
-            <nav className="flex gap-4">
-              <Link to="/dashboard">
-                <Button variant="ghost">Dashboard</Button>
-              </Link>
-              <Link to="/analyze">
-                <Button variant="ghost">Analyze</Button>
-              </Link>
-              <Link to="/profile">
-                <Button variant="ghost">Profile</Button>
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
+      <Header />
 
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8">
@@ -159,7 +173,7 @@ const Analyze = () => {
               <CardTitle>Analysis Results</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-4">
                 <div className="space-y-1">
                   <p className="text-sm text-muted-foreground">Detected Dish</p>
                   <p className="text-2xl font-semibold">{result.dish}</p>
@@ -175,24 +189,66 @@ const Analyze = () => {
                     +{result.predictedDelta} mg/dL
                   </p>
                 </div>
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">AI Confidence</p>
+                  <p className="text-2xl font-semibold text-primary">{result.confidence}%</p>
+                </div>
               </div>
 
+              {/* Status Banner */}
               <div
-                className={`p-4 rounded-lg ${
-                  result.status === "borderline"
-                    ? "bg-warning/10 border border-warning/20"
-                    : "bg-success/10 border border-success/20"
+                className={`p-4 rounded-lg border-2 ${
+                  result.status === "high"
+                    ? "bg-destructive/10 border-destructive/20"
+                    : result.status === "borderline"
+                    ? "bg-warning/10 border-warning/20"
+                    : "bg-success/10 border-success/20"
                 }`}
               >
                 <h3 className="font-semibold mb-2 flex items-center gap-2">
-                  {result.status === "borderline" ? "⚠️" : "✅"} AI Health Advice
+                  {result.status === "high" ? "🔴" : result.status === "borderline" ? "⚠️" : "✅"}
+                  {result.status === "high" ? " High Risk Meal" : result.status === "borderline" ? " Moderate - Eat in Control" : " Safe Choice"}
                 </h3>
                 <p className="text-sm">{result.advice}</p>
               </div>
 
+              {/* Tips */}
+              {result.tips && result.tips.length > 0 && (
+                <div className="bg-muted/50 p-4 rounded-lg">
+                  <h4 className="font-semibold mb-2">💡 Quick Tips</h4>
+                  <ul className="space-y-1">
+                    {result.tips.map((tip, index) => (
+                      <li key={index} className="text-sm flex items-start gap-2">
+                        <span className="text-primary">•</span>
+                        {tip}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Food Swaps */}
+              {result.foodSwaps && result.foodSwaps.length > 0 && (
+                <div className="bg-muted/50 p-4 rounded-lg">
+                  <h4 className="font-semibold mb-2">🔄 Healthier Alternatives</h4>
+                  <ul className="space-y-1">
+                    {result.foodSwaps.map((swap, index) => (
+                      <li key={index} className="text-sm flex items-start gap-2">
+                        <span className="text-primary">•</span>
+                        {swap}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="flex gap-4">
-                <Button className="flex-1">Save Meal</Button>
-                <Button variant="outline" className="flex-1">
+                <Button onClick={handleSaveMeal} disabled={saving} className="flex-1 gap-2">
+                  <Save className="h-4 w-4" />
+                  {saving ? "Saving..." : "Save Meal"}
+                </Button>
+                <Button variant="outline" onClick={handleVoiceAdvice} className="flex-1 gap-2">
+                  <Volume2 className="h-4 w-4" />
                   Voice Advice
                 </Button>
               </div>
@@ -200,6 +256,8 @@ const Analyze = () => {
           </Card>
         )}
       </div>
+
+      <BottomNav />
     </div>
   );
 };

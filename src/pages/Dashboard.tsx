@@ -1,13 +1,18 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Activity, Heart, TrendingUp, Upload, Calendar, MessageSquare } from "lucide-react";
+import { Heart, TrendingUp, Upload, Calendar, MessageSquare, Activity } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import VitalCard from "@/components/VitalCard";
+import Header from "@/components/Header";
+import BottomNav from "@/components/BottomNav";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { fetchDashboard, DashboardData } from "@/lib/api";
 
 const Dashboard = () => {
   const [userName, setUserName] = useState("User");
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,7 +24,22 @@ const Dashboard = () => {
     
     const user = JSON.parse(userData);
     setUserName(user.name || user.email.split("@")[0]);
+
+    // Fetch dashboard data
+    loadDashboard();
   }, [navigate]);
+
+  const loadDashboard = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchDashboard("mock123");
+      setDashboardData(data);
+    } catch (error) {
+      console.error("Failed to load dashboard:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Mock data for charts
   const glucoseData = [
@@ -46,29 +66,8 @@ const Dashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="h-6 w-6 text-primary" />
-              <span className="text-xl font-bold text-primary">GlycoCare+</span>
-            </div>
-            <nav className="flex gap-4">
-              <Link to="/dashboard">
-                <Button variant="ghost">Dashboard</Button>
-              </Link>
-              <Link to="/analyze">
-                <Button variant="ghost">Analyze</Button>
-              </Link>
-              <Link to="/profile">
-                <Button variant="ghost">Profile</Button>
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
+      <Header />
 
       <div className="container mx-auto px-4 py-8">
         {/* Welcome Section */}
@@ -78,32 +77,92 @@ const Dashboard = () => {
         </div>
 
         {/* Vital Cards */}
-        <div className="grid gap-6 md:grid-cols-3 mb-8">
-          <VitalCard
-            title="Blood Glucose"
-            value={145}
-            unit="mg/dL"
-            icon={TrendingUp}
-            status="borderline"
-            target="< 140 mg/dL"
-          />
-          <VitalCard
-            title="Blood Pressure"
-            value="138/88"
-            unit="mmHg"
-            icon={Heart}
-            status="borderline"
-            target="< 120/80"
-          />
-          <VitalCard
-            title="Heart Rate"
-            value={92}
-            unit="BPM"
-            icon={Activity}
-            status="normal"
-            target="60-100 BPM"
-          />
-        </div>
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading your health data...</p>
+          </div>
+        ) : dashboardData ? (
+          <>
+            <div className="grid gap-6 md:grid-cols-3 mb-8">
+              <VitalCard
+                title="Blood Glucose"
+                value={dashboardData.glucose}
+                unit="mg/dL"
+                icon={TrendingUp}
+                status={
+                  dashboardData.glucose < 140
+                    ? "normal"
+                    : dashboardData.glucose < 180
+                    ? "borderline"
+                    : "high"
+                }
+                target="< 140 mg/dL"
+              />
+              <VitalCard
+                title="Blood Pressure"
+                value={`${dashboardData.systolic}/${dashboardData.diastolic}`}
+                unit="mmHg"
+                icon={Heart}
+                status={
+                  dashboardData.systolic < 120 && dashboardData.diastolic < 80
+                    ? "normal"
+                    : dashboardData.systolic < 140 && dashboardData.diastolic < 90
+                    ? "borderline"
+                    : "high"
+                }
+                target="< 120/80"
+              />
+              <VitalCard
+                title="Heart Rate"
+                value={dashboardData.heartRate}
+                unit="BPM"
+                icon={Activity}
+                status={
+                  dashboardData.heartRate >= 60 && dashboardData.heartRate <= 100
+                    ? "normal"
+                    : "borderline"
+                }
+                target="60-100 BPM"
+              />
+            </div>
+
+            {/* Latest Meal Summary */}
+            {dashboardData.latestMeal && (
+              <Card className="mb-8 border-l-4 border-l-primary">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    📊 Latest Meal Impact
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Dish</p>
+                      <p className="font-semibold">{dashboardData.latestMeal.dish}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Portion</p>
+                      <p className="font-semibold">{dashboardData.latestMeal.portion}g</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Glucose Impact</p>
+                      <p className="font-semibold text-warning">
+                        +{dashboardData.latestMeal.glucoseDelta} mg/dL
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Time</p>
+                      <p className="font-semibold">
+                        {new Date(dashboardData.latestMeal.timestamp).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        ) : null}
 
         {/* Charts Section */}
         <div className="grid gap-6 md:grid-cols-2 mb-8">
@@ -180,18 +239,24 @@ const Dashboard = () => {
                   Upload New Meal
                 </Button>
               </Link>
-              <Button variant="outline" className="w-full justify-start gap-2" size="lg">
-                <Calendar className="h-5 w-5" />
-                View 7-Day Summary
-              </Button>
-              <Button variant="outline" className="w-full justify-start gap-2" size="lg">
-                <MessageSquare className="h-5 w-5" />
-                Chat with AI Coach
-              </Button>
+              <Link to="/planner" className="block">
+                <Button variant="outline" className="w-full justify-start gap-2" size="lg">
+                  <Calendar className="h-5 w-5" />
+                  View 7-Day Summary
+                </Button>
+              </Link>
+              <Link to="/chat" className="block">
+                <Button variant="outline" className="w-full justify-start gap-2" size="lg">
+                  <MessageSquare className="h-5 w-5" />
+                  Chat with AI Coach
+                </Button>
+              </Link>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <BottomNav />
     </div>
   );
 };
